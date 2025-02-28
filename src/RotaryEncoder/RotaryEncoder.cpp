@@ -1,8 +1,8 @@
-#include "RotaryEncoder.h"
 #include <Arduino.h>
+#include "RotaryEncoder.h"
 
 RotaryEncoder::RotaryEncoder(int pinA, int pinB, int buttonPin)
-    : _pinA(pinA), _pinB(pinB), _buttonPin(buttonPin), _increment(0), _mode(Mode::Hours)
+    : _pinA(pinA), _pinB(pinB), _buttonPin(buttonPin), _lastStateA(HIGH), _increment(0), _mode(Mode::Hours)
 {
     pinMode(_pinA, INPUT_PULLUP);
     pinMode(_pinB, INPUT_PULLUP);
@@ -13,11 +13,11 @@ RotaryEncoder::~RotaryEncoder() {}
 
 void RotaryEncoder::update()
 {
-    static int lastState = digitalRead(_pinA);
-    int currentState = digitalRead(_pinA);
-    if (currentState != lastState)
+    int currentStateA = digitalRead(_pinA);
+
+    if (currentStateA != _lastStateA)
     {
-        if (digitalRead(_pinB) != currentState)
+        if (digitalRead(_pinB) != currentStateA)
         {
             _increment++;
         }
@@ -25,8 +25,8 @@ void RotaryEncoder::update()
         {
             _increment--;
         }
-        lastState = currentState;
     }
+    _lastStateA = currentStateA;
 }
 
 int RotaryEncoder::getIncrement() const
@@ -41,7 +41,7 @@ void RotaryEncoder::resetIncrement()
 
 bool RotaryEncoder::isButtonPressed() const
 {
-    return (digitalRead(_buttonPin) == LOW);
+    return digitalRead(_buttonPin) == LOW;
 }
 
 void RotaryEncoder::switchMode()

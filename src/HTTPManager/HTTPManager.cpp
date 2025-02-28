@@ -36,7 +36,7 @@ void HTTPManager::sendDisplayData(const std::string &data)
 void HTTPManager::sendLightCommand(bool on)
 {
     HTTPClient http;
-    http.begin("http://192.168.1.101/set");
+    http.begin("http://192.168.178.189/set");
     http.addHeader("Content-Type", "application/json");
     std::string payload = on ? "{\"state\": \"on\"}" : "{\"state\": \"off\"}";
     int httpResponseCode = http.POST(payload.c_str());

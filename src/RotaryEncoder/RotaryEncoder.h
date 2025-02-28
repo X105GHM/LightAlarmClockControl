@@ -2,6 +2,7 @@
 #define ROTARY_ENCODER_H
 
 #include <cstdint>
+#include <Arduino.h>
 
 class RotaryEncoder
 {
@@ -27,6 +28,7 @@ private:
     int _pinA;
     int _pinB;
     int _buttonPin;
+    int _lastStateA;
     int _increment;
     Mode _mode;
 };

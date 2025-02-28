@@ -53,7 +53,8 @@ void setup()
 
   EEPROM.begin(EEPROM_SIZE);
 
-  xTaskCreate(
+  xTaskCreate
+  (
       inputTask,   
       "InputTask", 
       4096,        
@@ -61,7 +62,9 @@ void setup()
       1,           
       NULL         
   );
-  xTaskCreate(
+
+  xTaskCreate
+  (
       httpTask,    
       "HTTPTask",  
       4096,        
@@ -71,7 +74,7 @@ void setup()
   );
 
   NTPManager ntpManager;
-  
+
   if (ntpManager.updateLocalTime())
   {
     Serial.println("NTP-Zeit erfolgreich aktualisiert.");
@@ -83,3 +86,5 @@ void setup()
 
   vTaskDelete(NULL);
 }
+
+void loop(){};
