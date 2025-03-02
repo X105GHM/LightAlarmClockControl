@@ -1,46 +1,64 @@
+#include "Button/Button.h"
 #include "AlarmClock.h"
 #include <Arduino.h>
-#include <EEPROM.h>
+#include <Preferences.h>
 #include <time.h>
 
-constexpr int EEPROM_SIZE = 16;
-constexpr int EEPROM_ADDR_ALARM_HOUR = 0;
-constexpr int EEPROM_ADDR_ALARM_MIN = 1;
-constexpr int EEPROM_ADDR_ALARM_SEC = 2;
-constexpr int EEPROM_ADDR_ALARM_ACTIVE = 3;
-
-AlarmClock::AlarmClock(RotaryEncoder &encoder, Button &confirmButton, Button &snoozeButton,
-                       SwitchInput &activeSwitch, Led &signalLed, HTTPManager &httpManager, NTPManager &ntpManager)
-    : _encoder(encoder), _confirmButton(confirmButton), _snoozeButton(snoozeButton),
-      _activeSwitch(activeSwitch), _signalLed(signalLed), _httpManager(httpManager), _ntpManager(ntpManager),
-      _alarmHours(7), _alarmMinutes(0), _alarmSeconds(0),
+AlarmClock::AlarmClock(RotaryEncoder &encoder, Button &button,
+                       SwitchInput &activeSwitch, Led &signalLed, HTTPManager &httpManager, NTPManager &ntpManager, Preferences &preferences)
+    : _encoder(encoder), _button(button),
+      _activeSwitch(activeSwitch), _signalLed(signalLed), _httpManager(httpManager), _ntpManager(ntpManager), _preferences(preferences),
       _alarmActive(false), _snoozed(false)
 {
-    loadAlarmFromEEPROM();
+ 
 }
 
-AlarmClock::~AlarmClock() {}
+AlarmClock::~AlarmClock() {
+    _preferences.end();
+}
 
-void AlarmClock::loadAlarmFromEEPROM()
+void AlarmClock::loadAlarmFromPreferences()
 {
-    _alarmHours = EEPROM.read(EEPROM_ADDR_ALARM_HOUR);
-    _alarmMinutes = EEPROM.read(EEPROM_ADDR_ALARM_MIN);
-    _alarmSeconds = EEPROM.read(EEPROM_ADDR_ALARM_SEC);
-    _alarmActive = (EEPROM.read(EEPROM_ADDR_ALARM_ACTIVE) != 0);
-
+    if (_preferences.isKey("alarmHour"))
+    {
+        _alarmHours = _preferences.getInt("alarmHour");
+        _alarmMinutes = _preferences.getInt("alarmMin");
+        _alarmSeconds = _preferences.getInt("alarmSec");
+        _alarmActive = _preferences.getBool("alarmActive");
+    }
+    else
+    {
+        _alarmHours = 6;
+        _alarmMinutes = 0;
+        _alarmSeconds = 0;
+        _alarmActive = false;
+        saveAlarmToPreferences();
+    }
     Serial.printf("Geladene Alarmzeit: %02d:%02d:%02d, aktiv: %s\n",
                   _alarmHours, _alarmMinutes, _alarmSeconds, _alarmActive ? "ja" : "nein");
 }
 
-void AlarmClock::saveAlarmToEEPROM()
+void AlarmClock::saveAlarmToPreferences()
 {
-    EEPROM.write(EEPROM_ADDR_ALARM_HOUR, _alarmHours);
-    EEPROM.write(EEPROM_ADDR_ALARM_MIN, _alarmMinutes);
-    EEPROM.write(EEPROM_ADDR_ALARM_SEC, _alarmSeconds);
-    EEPROM.write(EEPROM_ADDR_ALARM_ACTIVE, _alarmActive ? 1 : 0);
-    EEPROM.commit();
+    _preferences.putInt("alarmHour", _alarmHours);
+    _preferences.putInt("alarmMin", _alarmMinutes);
+    _preferences.putInt("alarmSec", _alarmSeconds);
+    _preferences.putBool("alarmActive", _alarmActive);
+    _preferences.end(); 
+    _preferences.begin("alarmClock", false);
+    sendDisplayUpdate();
+    
     Serial.printf("Gespeicherte Alarmzeit: %02d:%02d:%02d, aktiv: %s\n",
                   _alarmHours, _alarmMinutes, _alarmSeconds, _alarmActive ? "ja" : "nein");
+}
+
+void AlarmClock::sendDisplayUpdate()
+{
+    char buffer[128];
+    snprintf(buffer, sizeof(buffer),
+             "{\"hours\": %d, \"minutes\": %d, \"seconds\": %d, \"active\": %s}",
+             _alarmHours, _alarmMinutes, _alarmSeconds, _alarmActive ? "true" : "false");
+    _httpManager.sendDisplayData(buffer);
 }
 
 void AlarmClock::updateAlarmTime()
@@ -54,27 +72,15 @@ void AlarmClock::updateAlarmTime()
         switch (_encoder.getMode())
         {
         case RotaryEncoder::Mode::Hours:
-            _alarmHours += increment;
-            if (_alarmHours < 0)
-                _alarmHours = 23;
-            if (_alarmHours > 23)
-                _alarmHours = 0;
+            _alarmHours = (_alarmHours + increment + 24) % 24;
             timeChanged = true;
             break;
         case RotaryEncoder::Mode::Minutes:
-            _alarmMinutes += increment;
-            if (_alarmMinutes < 0)
-                _alarmMinutes = 59;
-            if (_alarmMinutes > 59)
-                _alarmMinutes = 0;
+            _alarmMinutes = (_alarmMinutes + increment + 60) % 60;
             timeChanged = true;
             break;
         case RotaryEncoder::Mode::Seconds:
-            _alarmSeconds += increment;
-            if (_alarmSeconds < 0)
-                _alarmSeconds = 59;
-            if (_alarmSeconds > 59)
-                _alarmSeconds = 0;
+            _alarmSeconds = (_alarmSeconds + increment + 60) % 60;
             timeChanged = true;
             break;
         }
@@ -85,43 +91,43 @@ void AlarmClock::updateAlarmTime()
     {
         _encoder.switchMode();
         timeChanged = true;
-        vTaskDelay(50);
     }
 
-    if (_confirmButton.isPressed())
+    if (_button.isPressed(1))
     {
-        bool prevActive = _alarmActive;
-        _alarmActive = !_alarmActive;
-        if (prevActive != _alarmActive)
-        {
-            timeChanged = true;
-        }
-        vTaskDelay(50);
-    }
-
-    if (_activeSwitch.isActive())
-    {
-        if (!_alarmActive)
-        {
-            _alarmActive = true;
-            timeChanged = true;
-        }
+        saveAlarmToPreferences();
     }
 
     if (timeChanged)
     {
-        saveAlarmToEEPROM();
         sendDisplayUpdate();
+        Serial.printf("Display: %02d %02d %02d\n", _alarmHours, _alarmMinutes, _alarmSeconds);
     }
 }
 
-void AlarmClock::sendDisplayUpdate()
+void AlarmClock::updateAlarmActiveState()
 {
-    char buffer[128];
-    snprintf(buffer, sizeof(buffer),
-             "{\"hours\": %d, \"minutes\": %d, \"seconds\": %d}",
-             _alarmHours, _alarmMinutes, _alarmSeconds);
-    _httpManager.sendDisplayData(buffer);
+    bool switchState = _activeSwitch.isActive();
+    if (switchState != _alarmActive)
+    {
+        _alarmActive = switchState;
+        _preferences.putBool("alarmActive", _alarmActive);
+        _preferences.end(); 
+        _preferences.begin("alarmClock", false);
+
+        Serial.printf("Alarm aktiviert: %s\n", _alarmActive ? "ja" : "nein");
+        
+        if (_alarmActive)
+        {
+            _signalLed.on();
+            sendDisplayUpdate();
+        }
+        else
+        {
+            _signalLed.off();
+            _httpManager.sendDirectOff();
+        }
+    }
 }
 
 void AlarmClock::checkAndActivateLight()
@@ -130,26 +136,28 @@ void AlarmClock::checkAndActivateLight()
     struct tm *timeinfo = localtime(&nowTime);
 
     int currentSeconds = timeinfo->tm_hour * 3600 + timeinfo->tm_min * 60 + timeinfo->tm_sec;
-    int alarmSeconds = _alarmHours * 3600 + _alarmMinutes * 60 + _alarmSeconds;
-
+    
+    int storedAlarmHours = _preferences.getInt("alarmHour", 6);
+    int storedAlarmMinutes = _preferences.getInt("alarmMin", 0);
+    int storedAlarmSeconds = _preferences.getInt("alarmSec", 0);
+    bool storedAlarmActive = _preferences.getBool("alarmActive", false);
+    
+    int alarmSeconds = storedAlarmHours * 3600 + storedAlarmMinutes * 60 + storedAlarmSeconds;
     int diff = alarmSeconds - currentSeconds;
 
-    bool shouldLightBeOn = false;
-    if (_alarmActive && diff > 0 && diff <= 1800)
-    {
-        shouldLightBeOn = true;
-    }
-
+    bool shouldLightBeOn = (storedAlarmActive && diff > 0 && diff <= 1800);
     static bool lastLightState = false;
+
     if (shouldLightBeOn != lastLightState)
     {
         if (shouldLightBeOn)
         {
             _httpManager.sendLightCommand(true);
+            sendDisplayUpdate();
         }
         else
         {
-            _httpManager.sendLightCommand(false);
+            //_httpManager.sendDirectOff();
         }
         lastLightState = shouldLightBeOn;
     }
@@ -158,10 +166,25 @@ void AlarmClock::checkAndActivateLight()
 void AlarmClock::processInputs()
 {
     updateAlarmTime();
+    updateAlarmActiveState();
+    if (_button.isPressed(2))
+    {
+        if (!_snoozed)
+        {
+            _httpManager.sendDirectOn();
+            _snoozed = true;
+            Serial.println("Button 2 gedrückt: sendDirectOn()");
+        }
+        else
+        {
+        _httpManager.sendDirectOff();
+        _snoozed = false;
+        Serial.println("Button 2 gedrückt: sendDirectOff()");
+        }
+    }
 }
 
 void AlarmClock::processHTTP()
 {
-    sendDisplayUpdate();
     checkAndActivateLight();
 }

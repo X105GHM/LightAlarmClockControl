@@ -2,7 +2,10 @@
 #include "RotaryEncoder.h"
 
 RotaryEncoder::RotaryEncoder(int pinA, int pinB, int buttonPin)
-    : _pinA(pinA), _pinB(pinB), _buttonPin(buttonPin), _lastStateA(HIGH), _increment(0), _mode(Mode::Hours)
+    : _pinA(pinA), _pinB(pinB), _buttonPin(buttonPin),
+      _lastStateA(HIGH), _lastStateB(HIGH), _lastRotationDebounceTime(0),
+      _lastButtonState(HIGH), _lastButtonPressTime(0), _buttonPressed(false),
+      _increment(0), _mode(Mode::Hours)
 {
     pinMode(_pinA, INPUT_PULLUP);
     pinMode(_pinB, INPUT_PULLUP);
@@ -13,11 +16,14 @@ RotaryEncoder::~RotaryEncoder() {}
 
 void RotaryEncoder::update()
 {
-    int currentStateA = digitalRead(_pinA);
+    unsigned long currentTime = millis();
 
-    if (currentStateA != _lastStateA)
+    int currentStateA = digitalRead(_pinA);
+    int currentStateB = digitalRead(_pinB);
+
+    if (currentStateA != _lastStateA && currentStateA == LOW)
     {
-        if (digitalRead(_pinB) != currentStateA)
+        if (currentStateB == HIGH)
         {
             _increment++;
         }
@@ -25,13 +31,27 @@ void RotaryEncoder::update()
         {
             _increment--;
         }
+        _lastRotationDebounceTime = currentTime;
     }
     _lastStateA = currentStateA;
+
+    int currentButtonState = digitalRead(_buttonPin);
+    if (currentButtonState != _lastButtonState)
+    {
+        if (currentButtonState == LOW && (currentTime - _lastButtonPressTime >= BUTTON_DEBOUNCE_DELAY))
+        {
+            _buttonPressed = true;
+            _lastButtonPressTime = currentTime;
+        }
+        _lastButtonState = currentButtonState;
+    }
 }
 
-int RotaryEncoder::getIncrement() const
+int RotaryEncoder::getIncrement()
 {
-    return _increment;
+    int temp = _increment;
+    _increment = 0;
+    return temp;
 }
 
 void RotaryEncoder::resetIncrement()
@@ -39,9 +59,11 @@ void RotaryEncoder::resetIncrement()
     _increment = 0;
 }
 
-bool RotaryEncoder::isButtonPressed() const
+bool RotaryEncoder::isButtonPressed()
 {
-    return digitalRead(_buttonPin) == LOW;
+    bool wasPressed = _buttonPressed;
+    _buttonPressed = false;
+    return wasPressed;
 }
 
 void RotaryEncoder::switchMode()

@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <EEPROM.h>
+#include <Preferences.h>
 #include "RotaryEncoder/RotaryEncoder.h"
 #include "Button/Button.h"
 #include "SwitchInput/Switchinput.h"
@@ -16,14 +17,15 @@ constexpr int SNOOZE_BUTTON_PIN = 25;
 constexpr int SWITCH_PIN = 26;
 constexpr int LED_PIN = 27;
 
+Preferences preferences;
 RotaryEncoder encoder(ROTARY_PIN_A, ROTARY_PIN_B, ROTARY_BUTTON_PIN);
-Button confirmButton(CONFIRM_BUTTON_PIN);
-Button snoozeButton(SNOOZE_BUTTON_PIN);
+Button button(CONFIRM_BUTTON_PIN, SNOOZE_BUTTON_PIN);
 SwitchInput alarmSwitch(SWITCH_PIN);
 Led signalLed(LED_PIN);
 HTTPManager httpManager;
 NTPManager ntpManager("de.pool.ntp.org", 3600, 3600);
-AlarmClock alarmClock(encoder, confirmButton, snoozeButton, alarmSwitch, signalLed, httpManager, ntpManager);
+AlarmClock alarmClock(encoder, button, alarmSwitch, signalLed, httpManager, ntpManager, preferences);
+
 
 void inputTask(void *pvParameters)
 {
@@ -33,7 +35,6 @@ void inputTask(void *pvParameters)
     alarm->processInputs();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
-  vTaskDelete(NULL);
 }
 
 void httpTask(void *pvParameters)
@@ -44,34 +45,41 @@ void httpTask(void *pvParameters)
     alarm->processHTTP();
     vTaskDelay(pdMS_TO_TICKS(50));
   }
-  vTaskDelete(NULL);
 }
 
 void setup()
 {
   Serial.begin(115200);
 
-  EEPROM.begin(EEPROM_SIZE);
+  Serial.println("EEPROM initialisiert.");
 
-  xTaskCreate
+  httpManager.connectWiFi();
+
+  xTaskCreatePinnedToCore
   (
       inputTask,   
       "InputTask", 
       4096,        
       &alarmClock, 
       1,           
-      NULL         
+      NULL,
+      0         
   );
 
-  xTaskCreate
+  Serial.println("InputTask initialisiert.");
+
+  xTaskCreatePinnedToCore
   (
       httpTask,    
       "HTTPTask",  
       4096,        
       &alarmClock, 
       1,           
-      NULL         
+      NULL,
+      1         
   );
+
+  Serial.println("HTTPTask initialisiert.");
 
   NTPManager ntpManager;
 
@@ -83,6 +91,9 @@ void setup()
   {
     Serial.println("NTP-Zeit konnte nicht aktualisiert werden.");
   }
+
+    preferences.begin("alarmClock", false);
+    alarmClock.loadAlarmFromPreferences();
 
   vTaskDelete(NULL);
 }
