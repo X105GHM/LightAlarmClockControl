@@ -96,6 +96,12 @@ void AlarmClock::updateAlarmTime()
     if (_button.isPressed(1))
     {
         saveAlarmToPreferences();
+        sendDisplayUpdate();
+        delay(1000);
+        _httpManager.sendDisplayData("{\"hours\": 0, \"minutes\": 0, \"seconds\": 0, \"active\": false}");
+        delay(1000);
+        sendDisplayUpdate();
+
     }
 
     if (timeChanged)
